@@ -4,38 +4,38 @@ interface Global {
   B: {};
   C: {};
 }
-interface GlobalLabels {
+interface LabelledGlobals {
   [key:string]:Global
 }
 interface Select<R, LS> {
   kind: "select";
-  role: (r:R) => void;
+  role: R;
   labels: LS;
 }
 interface Offer<R, LS> {
   kind: "offer";
-  role: (r:R) => void;
+  role: R;
   labels: LS;
 }
 interface Close {
   kind: "close"
 }
-type AtoB<LS extends GlobalLabels> = {
+type AtoB<LS extends LabelledGlobals> = {
   A: Select<"B", {[L in keyof LS]: LS[L]["A"]}>;
   B: Offer<"A", {[L in keyof LS]: [L, LS[L]["B"]]}[keyof LS]>;
   C: Merge<LS[keyof LS]["C"]>
 }
-type BtoA<LS extends GlobalLabels> = {
+type BtoA<LS extends LabelledGlobals> = {
   A: Offer<"B", {[L in keyof LS]: [L, LS[L]["A"]]}[keyof LS]>;
   B: Select<"A", {[L in keyof LS]: LS[L]["B"]}>;
   C: Merge<LS[keyof LS]["C"]>
 }
-type BtoC<LS extends GlobalLabels> = {
+type BtoC<LS extends LabelledGlobals> = {
   A: Merge<LS[keyof LS]["A"]>
   B: Select<"C", {[L in keyof LS]: LS[L]["B"]}>;
   C: Offer<"B", {[L in keyof LS]: [L, LS[L]["C"]]}[keyof LS]>;
 }
-type CtoA<LS extends GlobalLabels> = {
+type CtoA<LS extends LabelledGlobals> = {
   A: Offer<"C", {[L in keyof LS]: [L, LS[L]["A"]]}[keyof LS]>;
   B: Merge<LS[keyof LS]["B"]>
   C: Select<"A", {[L in keyof LS]: LS[L]["C"]}>;
@@ -63,34 +63,38 @@ type MapFst<T> =
   ? L 
   : {error:"Internal error: MapFst: non-pair type", cause:T};
 
+type ToIntersection<T> =
+  (T extends infer T0 ? (x:T0) => void : never) extends (x:infer T0) => void 
+  ? T0 
+  : never;
+
+type IsSingletonString<R> =
+  [R] extends [string]
+  ? [ToIntersection<R>] extends [never] ? false : true
+  : false // not a string
+
 // AllKeys<{a:S1} | {b:S2, c:S3}> == "a"|"b"|"c"
 type AllKeys<T> =
   T extends infer T0 ? keyof T0 : "assertfalse_str";
 
 type Merge<T> = 
-  [T] extends [Offer<never, {}>] 
+  [T] extends [Offer<string, {}>] 
   ? MergeOffer<T> 
-    : [T] extends [Select<never, {}>]
+    : [T] extends [Select<string, {}>]
     ? MergeSelect<T>
     : [T] extends [Close]
       ? Close
       : {error: "can't merge", cause:T}
 
-type MergeOffer<T> =
-  [T] extends [Offer<infer R, infer LS>]
-  ? [R] extends [never] 
-    ? {error:"Offer: can't merge: Destination role conflict"} 
-    : Offer<R, MergeOfferBranch<LS>>
-  : assertfalse;
+type MergeOffer<T extends Offer<string, {}>> =
+  IsSingletonString<T["role"]> extends false
+  ? {error:"Offer: can't merge: Destination role conflict", cause:T["role"]} 
+  : Offer<T["role"], MergeOfferBranch<T["labels"]>>
 
-type MergeSelect<T> =
-  ([T] extends [Select<infer R,{}>] ? R : never) extends infer R
-  ? [R] extends [never]
-    ? {error: "Select: can't merge: Destination role conflict"}
-    : (T extends Select<never, infer LS> ? LS : assertfalse) extends infer LS
-      ? Select<R, MakeSelectBranch<LS>>
-      : assertfalse
-  : assertfalse;
+type MergeSelect<T extends Select<string, {}>> =
+  IsSingletonString<T["role"]> extends false
+  ? {error: "Select: can't merge: Destination role conflict", cause:T["role"]}
+  : Select<T["role"], MakeSelectBranch<T["labels"]>>
 
 // MergeOfferBranch<["a",S1]|["b",S2]|["a",S3]> == ["a",Merge<S1|S3>]|["b",Merge<S2>]
 type MergeOfferBranch<LS> =
@@ -101,6 +105,7 @@ type MergeOfferBranch<LS> =
   : assertfalse;
 
 // MakeSelectBranch<{a:S1,b:S2}|{a:S3,b:S4}> == {a:Merge<S1|S2>, b:Merge<S3,S4>}
+// MakeSelectBranch<{a:S1,b:S2}|{a:S3}> == ERROR
 type MakeSelectBranch<LS> =
   IfEq<AllKeys<LS>, keyof LS,
       {[K in AllKeys<LS>]: K extends keyof LS ? Merge< LS[K] > : assertfalse},
@@ -199,7 +204,7 @@ type SC1Test = Merge<Offer<"B", ["c",Select<"A", {a1:Close}>]> | Offer<"B", ["c"
 // }>] | ["d", Select<"A", {
 //     a2: Close;
 // }>]>
-type ErrG2 = AtoB<{a:CtoA<{c:Finish}>, b:CtoA<{d:Finish}>}>
+type ErrG2 = AtoB<{a:CtoA<{c:Finish, d:Finish}>, b:CtoA<{d:Finish}>}>
 type ErrSC2 = ErrG2["C"]
 // type ErrSC2 = Select<"A", {
 //     error: "Select: can't merge: labels differ";
